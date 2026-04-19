@@ -1,0 +1,31 @@
+{
+  "rules": {
+    "strategy": "FBO",
+    "assets": {
+      "GOLD": {
+        "pip_value": 10,
+        "currency": "USD"
+      },
+      "BTC": {
+        "pip_value": 0.1,
+        "currency": "USD"
+      }
+    },
+    "risk_profiles": {
+      "conservative": 1,
+      "moderate": 2,
+      "aggressive": 5
+    },
+    "fbo_setup": {
+      "fib_entry_low": 0.618,
+      "fib_entry_high": 0.786,
+      "rr_ratio": 2.0,
+      "sl_buffer_pct": 0.1,
+      "ob_lookback": 10
+    },
+    "order_block": {
+      "bull": "Last red candle before bullish impulse",
+      "bear": "Last green candle before bearish impulse"
+    }
+  }
+}
