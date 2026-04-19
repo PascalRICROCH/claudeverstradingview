@@ -1,0 +1,94 @@
+//@version=5
+indicator("FBO Setup ICT", overlay=true, max_boxes_count=200, max_labels_count=200, max_lines_count=200)
+
+g1 = "Détection"
+g2 = "Affichage"
+lookback    = input.int(10,    "Lookback swing",    minval=3,   group=g1)
+ob_strength = input.float(1.5, "Force OB",          minval=1.0, step=0.1, group=g1)
+rr          = input.float(2.0, "Ratio RR",          minval=1.0, step=0.5, group=g1)
+sl_buf      = input.float(0.05,"Buffer SL pct",     minval=0.0, step=0.05, group=g1)
+ob_ext      = input.int(50,    "Extension OB",      minval=10,  group=g2)
+
+col_tp    = #26a69a
+col_sl    = #ef5350
+col_entry = #2962ff
+col_white = color.white
+
+ema20  = ta.ema(close, 20)
+ema50  = ta.ema(close, 50)
+ema200 = ta.ema(close, 200)
+
+bullTrend = ema20 > ema50 and ema50 > ema200 and close > ema50
+bearTrend = ema20 < ema50 and ema50 < ema200 and close < ema50
+
+plot(ema20,  "EMA 20",  color.new(#26a69a, 30), 1)
+plot(ema50,  "EMA 50",  color.new(#2962ff, 30), 1)
+plot(ema200, "EMA 200", color.new(#ef5350, 30), 2)
+
+bgcolor(bullTrend ? color.new(#26a69a, 97) : na, title="Fond bull")
+bgcolor(bearTrend ? color.new(#ef5350, 97) : na, title="Fond bear")
+
+avgBody     = ta.sma(math.abs(close - open), 20)
+bullImpulse = close > open and (close - open) >= avgBody * ob_strength and close > high[1]
+isBullOB    = bullImpulse and close[1] < open[1]
+obBullTop   = isBullOB ? open[1]  : na
+obBullBot   = isBullOB ? close[1] : na
+
+bearImpulse = open > close and (open - close) >= avgBody * ob_strength and close < low[1]
+isBearOB    = bearImpulse and close[1] > open[1]
+obBearTop   = isBearOB ? close[1] : na
+obBearBot   = isBearOB ? open[1]  : na
+
+swHigh = ta.highest(high, lookback)
+swLow  = ta.lowest(low,  lookback)
+fibR   = math.max(swHigh - swLow, 0.001)
+f618   = swHigh - fibR * 0.618
+f786   = swHigh - fibR * 0.786
+f618b  = swLow  + fibR * 0.618
+f786b  = swLow  + fibR * 0.786
+
+plot(f618,  "0.618", color.new(color.orange,  0), 1)
+plot(f786,  "0.786", color.new(color.orange, 40), 1)
+plot(swHigh - fibR * 0.5, "0.500", color.new(color.gray, 50), 1)
+
+bullFBO = isBullOB and bullTrend and not na(obBullTop) and obBullBot <= f618 and obBullTop >= f786
+bearFBO = isBearOB and bearTrend and not na(obBearBot) and obBearTop >= f618b and obBearBot <= f786b
+
+if bullFBO
+    entry  = obBullTop
+    buf    = sl_buf / 100.0
+    sl     = obBullBot * (1.0 - buf)
+    risk   = math.max(entry - sl, 0.001)
+    tp     = entry + risk * rr
+    ext    = bar_index + ob_ext
+    box.new(bar_index[1], obBullTop, ext, obBullBot, border_color=color.new(#26a69a, 30), bgcolor=color.new(#26a69a, 85), border_width=1, text="OB Demand", text_color=color.new(#26a69a, 10), text_size=size.small, text_halign=text.align_left, text_valign=text.align_center)
+    line.new(bar_index, entry, ext, entry, color=color.new(col_entry, 0), width=2)
+    label.new(bar_index, entry, " LONG " + str.tostring(math.round(entry, 1)), color=color.new(col_entry, 10), textcolor=col_white, style=label.style_label_right, size=size.normal)
+    line.new(bar_index, sl, ext, sl, color=color.new(col_sl, 0), width=2)
+    label.new(bar_index, sl, " SL " + str.tostring(math.round(sl, 1)) + " (-" + str.tostring(math.round(risk, 1)) + ")", color=color.new(col_sl, 10), textcolor=col_white, style=label.style_label_right, size=size.small)
+    line.new(bar_index, tp, ext, tp, color=color.new(col_tp, 0), width=2)
+    label.new(bar_index, tp, " TP " + str.tostring(math.round(tp, 1)) + " (+" + str.tostring(math.round(risk * rr, 1)) + ") RR1:" + str.tostring(rr), color=color.new(col_tp, 10), textcolor=col_white, style=label.style_label_right, size=size.small)
+    box.new(bar_index, sl, ext, sl - risk * 0.3, border_color=color.new(col_sl, 20), bgcolor=color.new(col_sl, 85), border_width=1, text="", text_color=col_white, text_size=size.tiny)
+    box.new(bar_index, tp + risk * 0.3, ext, tp, border_color=color.new(col_tp, 20), bgcolor=color.new(col_tp, 85), border_width=1, text="", text_color=col_white, text_size=size.tiny)
+    label.new(bar_index, low * 0.9990, "FBO LONG\nEntry " + str.tostring(math.round(entry, 1)) + "\nSL    " + str.tostring(math.round(sl, 1)) + "\nTP    " + str.tostring(math.round(tp, 1)) + "\nRR    1:" + str.tostring(rr), color=color.new(col_entry, 5), textcolor=col_white, style=label.style_label_up, size=size.normal)
+
+if bearFBO
+    entry  = obBearBot
+    buf    = sl_buf / 100.0
+    sl     = obBearTop * (1.0 + buf)
+    risk   = math.max(sl - entry, 0.001)
+    tp     = entry - risk * rr
+    ext    = bar_index + ob_ext
+    box.new(bar_index[1], obBearTop, ext, obBearBot, border_color=color.new(col_sl, 30), bgcolor=color.new(col_sl, 85), border_width=1, text="OB Supply", text_color=color.new(col_sl, 10), text_size=size.small, text_halign=text.align_left, text_valign=text.align_center)
+    line.new(bar_index, entry, ext, entry, color=color.new(#ff6d00, 0), width=2)
+    label.new(bar_index, entry, " SHORT " + str.tostring(math.round(entry, 1)), color=color.new(#ff6d00, 10), textcolor=col_white, style=label.style_label_right, size=size.normal)
+    line.new(bar_index, sl, ext, sl, color=color.new(col_sl, 0), width=2)
+    label.new(bar_index, sl, " SL " + str.tostring(math.round(sl, 1)) + " (+" + str.tostring(math.round(risk, 1)) + ")", color=color.new(col_sl, 10), textcolor=col_white, style=label.style_label_right, size=size.small)
+    line.new(bar_index, tp, ext, tp, color=color.new(col_tp, 0), width=2)
+    label.new(bar_index, tp, " TP " + str.tostring(math.round(tp, 1)) + " (-" + str.tostring(math.round(risk * rr, 1)) + ") RR1:" + str.tostring(rr), color=color.new(col_tp, 10), textcolor=col_white, style=label.style_label_right, size=size.small)
+    box.new(bar_index, sl + risk * 0.3, ext, sl, border_color=color.new(col_sl, 20), bgcolor=color.new(col_sl, 85), border_width=1, text="", text_color=col_white, text_size=size.tiny)
+    box.new(bar_index, tp, ext, tp - risk * 0.3, border_color=color.new(col_tp, 20), bgcolor=color.new(col_tp, 85), border_width=1, text="", text_color=col_white, text_size=size.tiny)
+    label.new(bar_index, high * 1.0010, "FBO SHORT\nEntry " + str.tostring(math.round(entry, 1)) + "\nSL    " + str.tostring(math.round(sl, 1)) + "\nTP    " + str.tostring(math.round(tp, 1)) + "\nRR    1:" + str.tostring(rr), color=color.new(#ef5350, 5), textcolor=col_white, style=label.style_label_down, size=size.normal)
+
+plotshape(bullFBO, style=shape.triangleup,   location=location.belowbar, color=color.new(col_entry, 0), size=size.large, title="FBO Long")
+plotshape(bearFBO, style=shape.triangledown, location=location.abovebar, color=color.new(col_sl,    0), size=size.large, title="FBO Short")
