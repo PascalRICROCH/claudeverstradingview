@@ -1,33 +1,27 @@
 //@version=5
-indicator("FBO Setup ICT", overlay=true, max_boxes_count=200, max_labels_count=200, max_lines_count=200)
+indicator("FBO ICT", overlay=true, max_boxes_count=100, max_labels_count=100, max_lines_count=100)
 
-g1 = "Détection"
-g2 = "Affichage"
-lookback    = input.int(10,    "Lookback swing",    minval=3,   group=g1)
-ob_strength = input.float(1.5, "Force OB",          minval=1.0, step=0.1, group=g1)
-rr          = input.float(2.0, "Ratio RR",          minval=1.0, step=0.5, group=g1)
-sl_buf      = input.float(0.05,"Buffer SL pct",     minval=0.0, step=0.05, group=g1)
-ob_ext      = input.int(50,    "Extension OB",      minval=10,  group=g2)
+lookback    = input.int(10,    "Lookback",      minval=3)
+ob_strength = input.float(1.5, "Force OB",      minval=1.0, step=0.1)
+rr          = input.float(2.0, "R:R tendance",  minval=1.0, step=0.5)
+rr_ct       = input.float(1.5, "R:R CT",        minval=1.0, step=0.5)
+sl_buf      = input.float(0.05,"SL buf %",      minval=0.0, step=0.05)
+sl_buf_ct   = input.float(0.20,"SL buf CT %",   minval=0.0, step=0.05)
+ob_ext      = input.int(40,    "Extension OB",  minval=5)
+show_ct     = input.bool(true, "Contre-tendance")
 
-col_tp    = #26a69a
-col_sl    = #ef5350
-col_entry = #2962ff
-col_white = color.white
-
+// EMAs
 ema20  = ta.ema(close, 20)
 ema50  = ta.ema(close, 50)
 ema200 = ta.ema(close, 200)
+bullTrend = ema20 > ema50 and ema50 > ema200
+bearTrend = ema20 < ema50 and ema50 < ema200
 
-bullTrend = ema20 > ema50 and ema50 > ema200 and close > ema50
-bearTrend = ema20 < ema50 and ema50 < ema200 and close < ema50
+plot(ema20,  "EMA 20",  color.new(#26a69a, 40), 1)
+plot(ema50,  "EMA 50",  color.new(#2962ff, 40), 1)
+plot(ema200, "EMA 200", color.new(#ef5350, 40), 2)
 
-plot(ema20,  "EMA 20",  color.new(#26a69a, 30), 1)
-plot(ema50,  "EMA 50",  color.new(#2962ff, 30), 1)
-plot(ema200, "EMA 200", color.new(#ef5350, 30), 2)
-
-bgcolor(bullTrend ? color.new(#26a69a, 97) : na, title="Fond bull")
-bgcolor(bearTrend ? color.new(#ef5350, 97) : na, title="Fond bear")
-
+// OB detection
 avgBody     = ta.sma(math.abs(close - open), 20)
 bullImpulse = close > open and (close - open) >= avgBody * ob_strength and close > high[1]
 isBullOB    = bullImpulse and close[1] < open[1]
@@ -39,6 +33,7 @@ isBearOB    = bearImpulse and close[1] > open[1]
 obBearTop   = isBearOB ? close[1] : na
 obBearBot   = isBearOB ? open[1]  : na
 
+// Fibonacci
 swHigh = ta.highest(high, lookback)
 swLow  = ta.lowest(low,  lookback)
 fibR   = math.max(swHigh - swLow, 0.001)
@@ -47,48 +42,113 @@ f786   = swHigh - fibR * 0.786
 f618b  = swLow  + fibR * 0.618
 f786b  = swLow  + fibR * 0.786
 
-plot(f618,  "0.618", color.new(color.orange,  0), 1)
-plot(f786,  "0.786", color.new(color.orange, 40), 1)
-plot(swHigh - fibR * 0.5, "0.500", color.new(color.gray, 50), 1)
+// Signaux
+bullFBO    = isBullOB and bullTrend and not na(obBullTop) and obBullBot <= f618 and obBullTop >= f786
+bearFBO    = isBearOB and bearTrend and not na(obBearBot) and obBearTop >= f618b and obBearBot <= f786b
+bullFBO_CT = show_ct and isBullOB and not bullTrend and not na(obBullTop)
+bearFBO_CT = show_ct and isBearOB and not bearTrend and not na(obBearBot)
 
-bullFBO = isBullOB and bullTrend and not na(obBullTop) and obBullBot <= f618 and obBullTop >= f786
-bearFBO = isBearOB and bearTrend and not na(obBearBot) and obBearTop >= f618b and obBearBot <= f786b
+// ── Fonction dessin setup ──
+f_draw_bull(top, bot, is_ct) =>
+    buf   = is_ct ? sl_buf_ct : sl_buf
+    rr_   = is_ct ? rr_ct : rr
+    entry = top
+    sl    = bot * (1.0 - buf / 100.0)
+    risk  = math.max(entry - sl, 0.001)
+    tp    = entry + risk * rr_
+    ext   = bar_index + ob_ext
+    bcol  = is_ct ? color.new(#ff9800, 75) : color.new(#26a69a, 75)
+    bord  = is_ct ? color.new(#ff9800, 20) : color.new(#26a69a, 20)
 
+    // Zone OB — grande et claire
+    box.new(bar_index[1], top, ext, bot,
+         border_color=bord, bgcolor=bcol, border_width=1)
+
+    // Ligne TP verte
+    line.new(bar_index, tp, ext, tp,
+         color=color.new(#26a69a, 0), width=2)
+
+    // Ligne Entrée
+    line.new(bar_index, entry, ext, entry,
+         color=is_ct ? color.new(#ff9800, 0) : color.new(#2962ff, 0), width=2)
+
+    // Ligne SL rouge
+    line.new(bar_index, sl, ext, sl,
+         color=color.new(#ef5350, 0), width=2)
+
+    // Zone TP (verte légère)
+    box.new(bar_index, tp, ext, tp + risk * 0.5,
+         border_color=color.new(#26a69a, 30),
+         bgcolor=color.new(#26a69a, 88), border_width=0)
+
+    // Zone SL (rouge légère)
+    box.new(bar_index, sl - risk * 0.5, ext, sl,
+         border_color=color.new(#ef5350, 30),
+         bgcolor=color.new(#ef5350, 88), border_width=0)
+
+    // Label unique propre
+    label.new(bar_index + ob_ext, entry,
+         (is_ct ? "⚠ CT L  " : "LONG  ") +
+         str.tostring(math.round(entry, 1)) +
+         "  SL " + str.tostring(math.round(sl, 1)) +
+         "  TP " + str.tostring(math.round(tp, 1)),
+         color=is_ct ? color.new(#ff9800, 10) : color.new(#2962ff, 10),
+         textcolor=color.white,
+         style=label.style_label_left,
+         size=size.small)
+
+f_draw_bear(top, bot, is_ct) =>
+    buf   = is_ct ? sl_buf_ct : sl_buf
+    rr_   = is_ct ? rr_ct : rr
+    entry = bot
+    sl    = top * (1.0 + buf / 100.0)
+    risk  = math.max(sl - entry, 0.001)
+    tp    = entry - risk * rr_
+    ext   = bar_index + ob_ext
+    bcol  = is_ct ? color.new(#ff9800, 75) : color.new(#ef5350, 75)
+    bord  = is_ct ? color.new(#ff9800, 20) : color.new(#ef5350, 20)
+
+    box.new(bar_index[1], top, ext, bot,
+         border_color=bord, bgcolor=bcol, border_width=1)
+
+    line.new(bar_index, tp,    ext, tp,    color=color.new(#26a69a, 0), width=2)
+    line.new(bar_index, entry, ext, entry, color=is_ct ? color.new(#ff9800, 0) : color.new(#ff6d00, 0), width=2)
+    line.new(bar_index, sl,    ext, sl,    color=color.new(#ef5350, 0), width=2)
+
+    box.new(bar_index, tp - risk * 0.5, ext, tp,
+         border_color=color.new(#26a69a, 30),
+         bgcolor=color.new(#26a69a, 88), border_width=0)
+    box.new(bar_index, sl, ext, sl + risk * 0.5,
+         border_color=color.new(#ef5350, 30),
+         bgcolor=color.new(#ef5350, 88), border_width=0)
+
+    label.new(bar_index + ob_ext, entry,
+         (is_ct ? "⚠ CT S  " : "SHORT  ") +
+         str.tostring(math.round(entry, 1)) +
+         "  SL " + str.tostring(math.round(sl, 1)) +
+         "  TP " + str.tostring(math.round(tp, 1)),
+         color=is_ct ? color.new(#ff9800, 10) : color.new(#ef5350, 10),
+         textcolor=color.white,
+         style=label.style_label_left,
+         size=size.small)
+
+// Application
 if bullFBO
-    entry  = obBullTop
-    buf    = sl_buf / 100.0
-    sl     = obBullBot * (1.0 - buf)
-    risk   = math.max(entry - sl, 0.001)
-    tp     = entry + risk * rr
-    ext    = bar_index + ob_ext
-    box.new(bar_index[1], obBullTop, ext, obBullBot, border_color=color.new(#26a69a, 30), bgcolor=color.new(#26a69a, 85), border_width=1, text="OB Demand", text_color=color.new(#26a69a, 10), text_size=size.small, text_halign=text.align_left, text_valign=text.align_center)
-    line.new(bar_index, entry, ext, entry, color=color.new(col_entry, 0), width=2)
-    label.new(bar_index, entry, " LONG " + str.tostring(math.round(entry, 1)), color=color.new(col_entry, 10), textcolor=col_white, style=label.style_label_right, size=size.normal)
-    line.new(bar_index, sl, ext, sl, color=color.new(col_sl, 0), width=2)
-    label.new(bar_index, sl, " SL " + str.tostring(math.round(sl, 1)) + " (-" + str.tostring(math.round(risk, 1)) + ")", color=color.new(col_sl, 10), textcolor=col_white, style=label.style_label_right, size=size.small)
-    line.new(bar_index, tp, ext, tp, color=color.new(col_tp, 0), width=2)
-    label.new(bar_index, tp, " TP " + str.tostring(math.round(tp, 1)) + " (+" + str.tostring(math.round(risk * rr, 1)) + ") RR1:" + str.tostring(rr), color=color.new(col_tp, 10), textcolor=col_white, style=label.style_label_right, size=size.small)
-    box.new(bar_index, sl, ext, sl - risk * 0.3, border_color=color.new(col_sl, 20), bgcolor=color.new(col_sl, 85), border_width=1, text="", text_color=col_white, text_size=size.tiny)
-    box.new(bar_index, tp + risk * 0.3, ext, tp, border_color=color.new(col_tp, 20), bgcolor=color.new(col_tp, 85), border_width=1, text="", text_color=col_white, text_size=size.tiny)
-    label.new(bar_index, low * 0.9990, "FBO LONG\nEntry " + str.tostring(math.round(entry, 1)) + "\nSL    " + str.tostring(math.round(sl, 1)) + "\nTP    " + str.tostring(math.round(tp, 1)) + "\nRR    1:" + str.tostring(rr), color=color.new(col_entry, 5), textcolor=col_white, style=label.style_label_up, size=size.normal)
+    f_draw_bull(obBullTop, obBullBot, false)
 
 if bearFBO
-    entry  = obBearBot
-    buf    = sl_buf / 100.0
-    sl     = obBearTop * (1.0 + buf)
-    risk   = math.max(sl - entry, 0.001)
-    tp     = entry - risk * rr
-    ext    = bar_index + ob_ext
-    box.new(bar_index[1], obBearTop, ext, obBearBot, border_color=color.new(col_sl, 30), bgcolor=color.new(col_sl, 85), border_width=1, text="OB Supply", text_color=color.new(col_sl, 10), text_size=size.small, text_halign=text.align_left, text_valign=text.align_center)
-    line.new(bar_index, entry, ext, entry, color=color.new(#ff6d00, 0), width=2)
-    label.new(bar_index, entry, " SHORT " + str.tostring(math.round(entry, 1)), color=color.new(#ff6d00, 10), textcolor=col_white, style=label.style_label_right, size=size.normal)
-    line.new(bar_index, sl, ext, sl, color=color.new(col_sl, 0), width=2)
-    label.new(bar_index, sl, " SL " + str.tostring(math.round(sl, 1)) + " (+" + str.tostring(math.round(risk, 1)) + ")", color=color.new(col_sl, 10), textcolor=col_white, style=label.style_label_right, size=size.small)
-    line.new(bar_index, tp, ext, tp, color=color.new(col_tp, 0), width=2)
-    label.new(bar_index, tp, " TP " + str.tostring(math.round(tp, 1)) + " (-" + str.tostring(math.round(risk * rr, 1)) + ") RR1:" + str.tostring(rr), color=color.new(col_tp, 10), textcolor=col_white, style=label.style_label_right, size=size.small)
-    box.new(bar_index, sl + risk * 0.3, ext, sl, border_color=color.new(col_sl, 20), bgcolor=color.new(col_sl, 85), border_width=1, text="", text_color=col_white, text_size=size.tiny)
-    box.new(bar_index, tp, ext, tp - risk * 0.3, border_color=color.new(col_tp, 20), bgcolor=color.new(col_tp, 85), border_width=1, text="", text_color=col_white, text_size=size.tiny)
-    label.new(bar_index, high * 1.0010, "FBO SHORT\nEntry " + str.tostring(math.round(entry, 1)) + "\nSL    " + str.tostring(math.round(sl, 1)) + "\nTP    " + str.tostring(math.round(tp, 1)) + "\nRR    1:" + str.tostring(rr), color=color.new(#ef5350, 5), textcolor=col_white, style=label.style_label_down, size=size.normal)
+    f_draw_bear(obBearTop, obBearBot, false)
 
-plotshape(bullFBO, style=shape.triangleup,   location=location.belowbar, color=color.new(col_entry, 0), size=size.large, title="FBO Long")
-plotshape(bearFBO, style=shape.triangledown, location=location.abovebar, color=color.new(col_sl,    0), size=size.large, title="FBO Short")
+if bullFBO_CT
+    f_draw_bull(obBullTop, obBullBot, true)
+
+if bearFBO_CT
+    f_draw_bear(obBearTop, obBearBot, true)
+
+// Triangles
+plotshape(bullFBO,    style=shape.triangleup,   location=location.belowbar, color=#2962ff, size=size.small)
+plotshape(bearFBO,    style=shape.triangledown, location=location.abovebar, color=#ef5350, size=size.small)
+plotshape(bullFBO_CT, style=shape.triangleup,   location=location.belowbar, color=#ff9800, size=size.tiny)
+plotshape(bearFBO_CT, style=shape.triangledown, location=location.abovebar, color=#ff9800, size=size.tiny)
+EOFcat scripts/fbo_strategy.pine | pbcopy
+cat scripts/fbo_strategy.pine | pbcopy

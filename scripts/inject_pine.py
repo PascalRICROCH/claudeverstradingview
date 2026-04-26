@@ -2,7 +2,7 @@
 import urllib.request, json, websocket, time, argparse, sys, base64
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--symbol", default="XAUUSD")
+parser.add_argument("--symbol", default="BTCUSD")
 parser.add_argument("--tf",     default="15")
 parser.add_argument("--port",   default="9222")
 args = parser.parse_args()
@@ -33,114 +33,82 @@ print(f"[1] ✅ {tab['title']}")
 
 ws = websocket.create_connection(tab["webSocketDebuggerUrl"], timeout=15)
 print(f"[2] ✅ CDP connecté")
-time.sleep(1)
 
-# Injecte via l'API Monaco Editor
-print(f"[3] ⏳ Injection via Monaco Editor...")
+print(f"[3] ⏳ Injection...")
 r = js(ws, f"""
 (async () => {{
     const b64  = '{pine_b64}';
     const code = atob(b64);
 
-    // Méthode 1 : API Monaco globale
-    if (typeof monaco !== 'undefined') {{
-        const models = monaco.editor.getModels();
-        if (models.length > 0) {{
-            models[0].setValue(code);
-            return 'SUCCESS Monaco API models=' + models.length;
-        }}
-        const editors = monaco.editor.getEditors();
-        if (editors.length > 0) {{
-            editors[0].setValue(code);
-            return 'SUCCESS Monaco getEditors len=' + editors.length;
-        }}
+    // Méthode 1 : Monaco inputarea (celle qui a marché)
+    const monaco_ta = document.querySelector('.inputarea.monaco-mouse-cursor-text');
+    if (monaco_ta) {{
+        monaco_ta.focus();
+        await new Promise(r=>setTimeout(r,400));
+        monaco_ta.dispatchEvent(new KeyboardEvent('keydown',{{key:'a',ctrlKey:true,bubbles:true}}));
+        await new Promise(r=>setTimeout(r,300));
+        const ok = document.execCommand('insertText', false, code);
+        if (ok) return 'SUCCESS Monaco inputarea execCommand';
+
+        // Fallback nativeSetter
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,'value').set;
+        setter.call(monaco_ta, code);
+        monaco_ta.dispatchEvent(new Event('input',{{bubbles:true}}));
+        monaco_ta.dispatchEvent(new Event('change',{{bubbles:true}}));
+        return 'SUCCESS Monaco inputarea nativeSetter len=' + monaco_ta.value.length;
     }}
 
-    // Méthode 2 : via l'instance Monaco attachée au DOM
-    const monacoEl = document.querySelector('.monaco-editor');
-    if (monacoEl) {{
-        // Cherche l'instance via la propriété _modelData ou similar
-        const keys = Object.keys(monacoEl).filter(k => k.startsWith('__'));
-        for (const k of keys) {{
-            const inst = monacoEl[k];
-            if (inst && inst._modelData && inst._modelData.model) {{
-                inst._modelData.model.setValue(code);
-                return 'SUCCESS via __key modelData';
-            }}
-            if (inst && typeof inst.setValue === 'function') {{
-                inst.setValue(code);
-                return 'SUCCESS via __key setValue';
-            }}
-        }}
-    }}
-
-    // Méthode 3 : clipboard + Ctrl+A + Ctrl+V sur Monaco textarea
-    const ta = document.querySelector('.inputarea.monaco-mouse-cursor-text');
-    if (ta) {{
+    // Méthode 2 : toutes les textareas visibles
+    const all = [...document.querySelectorAll('textarea')];
+    const visible = all.filter(t => {{
+        const r = t.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+    }});
+    if (visible.length > 0) {{
+        const ta = visible[0];
         ta.focus();
-        await new Promise(r => setTimeout(r, 300));
-
-        // Ctrl+A pour tout sélectionner
-        ta.dispatchEvent(new KeyboardEvent('keydown', {{
-            key: 'a', code: 'KeyA', ctrlKey: true, bubbles: true, cancelable: true
-        }}));
-        await new Promise(r => setTimeout(r, 200));
-
-        // Insère via execCommand
-        const result = document.execCommand('insertText', false, code);
-        if (result) return 'SUCCESS execCommand Monaco textarea';
-
-        // Fallback : input event
-        const nativeSetter = Object.getOwnPropertyDescriptor(
-            window.HTMLTextAreaElement.prototype, 'value').set;
-        nativeSetter.call(ta, code);
-        ta.dispatchEvent(new InputEvent('input', {{bubbles: true, data: code}});
-        return 'SUCCESS nativeSetter Monaco textarea len=' + ta.value.length;
+        await new Promise(r=>setTimeout(r,400));
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,'value').set;
+        setter.call(ta, code);
+        ta.dispatchEvent(new Event('input',{{bubbles:true}}));
+        ta.dispatchEvent(new Event('change',{{bubbles:true}}));
+        return 'SUCCESS visible textarea len=' + ta.value.length;
     }}
 
-    return 'ERROR: Monaco non trouvé. monaco=' + (typeof monaco);
+    // Debug
+    const info = all.map(t=>{{
+        const r=t.getBoundingClientRect();
+        return t.className+' w='+Math.round(r.width)+' h='+Math.round(r.height);
+    }});
+    return 'ERROR: ' + JSON.stringify(info);
 }})()
 """, 2)
 
 val = r.get('result',{}).get('result',{}).get('value','?')
-print(f"[3] Injection : {val}")
+print(f"[3] {val}")
 
 if 'SUCCESS' in str(val):
     time.sleep(1)
-    # Clique Add to chart
     r2 = js(ws, """
-(async () => {
-    await new Promise(r => setTimeout(r, 500));
-
-    // Cherche le bouton Add to chart / play
+(async()=>{
+    await new Promise(r=>setTimeout(r,800));
+    // Cherche bouton Add to chart
     let btn = document.querySelector('[data-name="add-script-to-chart"]');
-    if (btn) { btn.click(); return 'OK data-name'; }
-
+    if(btn){ btn.click(); return 'OK data-name'; }
     const btns = [...document.querySelectorAll('button,[role=button]')];
-    btn = btns.find(b =>
-        b.textContent.match(/Add to chart|Ajouter au graphique/i) ||
-        b.getAttribute('aria-label')?.match(/add to chart|ajouter/i)
-    );
-    if (btn) { btn.click(); return 'OK: ' + btn.textContent.trim(); }
-
-    // Raccourci Ctrl+Enter dans Monaco
-    const ta = document.querySelector('.inputarea.monaco-mouse-cursor-text');
-    if (ta) {
-        ta.dispatchEvent(new KeyboardEvent('keydown', {
-            key: 'Enter', ctrlKey: true, bubbles: true
-        }));
-        return 'OK Ctrl+Enter';
-    }
-
-    return 'boutons: ' + btns.slice(0,8).map(b=>b.textContent.trim().substring(0,20)).join(' | ');
+    btn = btns.find(b=>b.textContent.match(/Add to chart|Ajouter/i));
+    if(btn){ btn.click(); return 'OK: '+btn.textContent.trim(); }
+    // Bouton play ▶
+    const play = document.querySelector('[data-name="pine-editor-run-button"]');
+    if(play){ play.click(); return 'OK play'; }
+    return 'Manuel: clique ▶ dans Pine Editor. Boutons: '+btns.slice(0,5).map(b=>b.textContent.trim().substring(0,15)).join(' | ');
 })()
 """, 3)
     val2 = r2.get('result',{}).get('result',{}).get('value','?')
     print(f"[4] Add to chart : {val2}")
-    print(f"\n✅ FBO injecté sur {args.symbol} TF:{args.tf} !")
+    print(f"\n✅ FBO injecté sur {args.symbol} !")
 else:
-    print(f"\n⚠️  {val}")
-    print("    Pine Editor est bien ouvert et visible ?")
+    print(f"\n⚠️  Échec — clique dans Pine Editor puis relance")
 
 ws.close()
 print(f"{'='*60}\n")
